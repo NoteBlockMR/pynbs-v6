@@ -22,7 +22,7 @@ def test_notes(snapshot: SnapshotFixture, filename: str):
 
 
 def test_create(snapshot: SnapshotFixture, tmp_path: Path):
-    f = pynbs.new_file(song_name="foo", song_author="bar")
+    f = pynbs.new_file(version=5, song_name="foo", song_author="bar")
 
     f.notes.extend(
         [
@@ -36,7 +36,7 @@ def test_create(snapshot: SnapshotFixture, tmp_path: Path):
 
     f.header.blocks_added = 9000
 
-    f.save(tmp_path / "new.nbs")
+    f.save(tmp_path / "new.nbs", version=5)
     f.save(tmp_path / "old.nbs", version=0)
 
     new = (tmp_path / "new.nbs").read_bytes()

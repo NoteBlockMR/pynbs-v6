@@ -40,8 +40,79 @@ $ pip install pynbs
 
 The latest release follows the latest version of the NBS file format
 [specification](https://opennbs.org/nbs)
-(version 5). However, it also allows you to load and save files in any of
+(version 6, as implemented by NoteBlockStudio 3.12.0-beta.5). It also allows you to load and save files in any of
 the older versions.
+
+### NBS v6 and event instruments
+
+New files use version 6 and 20 built-in instruments, including the four trumpet
+variants (IDs 16–19). Loaded files retain their original instrument indices.
+Saving to v0–v5 remaps custom indices and, if needed, includes the newer built-in
+instruments as custom instruments. Their `.ogg` files must be available to the
+player. Sound Stopper and Tempo Changer notes require v4 or later; saving them to older formats raises
+`ValueError` before opening the destination.
+
+```python
+song = pynbs.new_file()
+song.notes.append(pynbs.Note(tick=0, layer=0, instrument=16, key=45))
+song.add_sound_stopper(tick=16, layer=0, start_layer=1, end_layer=1)
+song.add_tempo_change(tick=32, layer=0, tempo=20.0)
+song.save("events.nbs")
+
+for event in pynbs.read("events.nbs").iter_events():
+    if isinstance(event, pynbs.SoundStopper):
+        print(event.tick, event.start_layer, event.end_layer)
+    elif isinstance(event, pynbs.TempoChange):
+        print(event.tick, event.tempo)
+```
+
+`tick` and `layer` are zero-based. Stopping ranges use NBS's **one-based,
+inclusive** layer numbers; `start_layer=0` stops all sounds. The creation API
+accepts endpoints 0–32767, matching the editor. `event.affects_layer(layer)`
+accepts a zero-based layer ID and follows NBS playback behavior, including
+clamping an end below the start to the start. Tempo is in ticks per second and
+is quantized to 1/15 tick per second.
+
+Both creation methods return the raw `Note`, reuse an existing event instrument
+by name, and create missing layers. An occupied tick/layer raises `ValueError`.
+`iter_events()` yields events in tick/layer order; raw event notes remain in
+`song.notes`. `get_custom_instrument(note)` resolves an absolute note instrument
+index to its custom `Instrument`, or returns `None` for a built-in/invalid index.
+
+The four additional UI events implemented in NoteBlockStudio 3.12.0-beta.5 are
+also supported. Each method returns a raw `Note`; `iter_events()` returns the
+corresponding typed event:
+
+| Creation method | Event type | NBS effect |
+| --- | --- | --- |
+| `add_toggle_rainbow(tick, layer)` | `ToggleRainbow` | Toggle rainbow accent colors |
+| `add_color_change(tick, layer, red, green, blue)` | `ColorChange` | Set accent color (RGB integers 0–255) |
+| `add_toggle_background_accent(tick, layer)` | `ToggleBackgroundAccent` | Toggle background accent |
+| `add_show_save_popup(tick, layer)` | `ShowSavePopup` | Display “Song saved”; no actual save |
+
+```python
+song.add_toggle_rainbow(tick=40, layer=0)
+song.add_color_change(tick=48, layer=0, red=255, green=128, blue=0)
+song.add_toggle_background_accent(tick=56, layer=0)
+song.add_show_save_popup(tick=64, layer=0)
+song.save("visual-events.nbs")
+```
+
+These events encode their action in the custom instrument name, so they can be
+stored in v0–v6 without losing event data. Older players may not implement the
+effects. Toggle events flip the current state; they do not encode an explicit
+on/off value. A separate custom instrument is used for each color.
+Color recognition follows NBS's case-insensitive name search and fixed RGB
+positions; malformed RGB values are omitted from `iter_events()` but their raw
+notes and instrument names remain intact. Other event names are case-sensitive.
+
+`Layer.lock` preserves all three states: `0` normal, `1` locked, `2` solo.
+Existing `False`/`True` inputs still work. Code checking lock state should compare
+to `1`, since a solo layer is also truthy.
+
+This library reads and writes song data; it does not play audio. A consuming
+player must apply tempo changes, layer solo/lock rules, and stop active sounds
+on the layers selected by each `SoundStopper` event.
 
 ## Basic usage
 
@@ -121,7 +192,7 @@ Attribute         | Type  | Details
 :-----------------|:------|:------------------------
 `layer.id`        | `int` | The ID of the layer.
 `layer.name`      | `str` | The name of the layer.
-`layer.lock`      | `bool`| Whether the layer is locked.
+`layer.lock`      | `int` | 0 = normal, 1 = locked, 2 = solo (boolean inputs also accepted).
 `layer.volume`    | `int` | The volume of the layer.
 `layer.panning`   | `int` | The stereo panning of the layer.
 
